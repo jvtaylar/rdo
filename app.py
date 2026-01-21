@@ -7,6 +7,7 @@
 
 import streamlit as st
 import hashlib
+import bcrypt
 from datetime import datetime
 import io
 import PyPDF2
@@ -17,7 +18,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 # ---------------- CONFIG ----------------
 DATABASE_URL = "sqlite:///research.db"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 engine = create_engine(
     DATABASE_URL,
@@ -54,8 +55,12 @@ class Paper(Base):
     authors = Column(String)
     year = Column(Integer)
     doi = Column(String)
+    tags = Column(String)  # comma-separated
     pdf_data = Column(LargeBinary)
     extracted_text = Column(Text)
+    reading_progress = Column(Integer, default=0)  # percent
+    highlights = Column(Text)  # JSON-like text
+    ai_summary = Column(Text)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     user_id = Column(Integer, ForeignKey("users.id"))
 
@@ -69,13 +74,20 @@ def run_migrations():
     if not row:
         db.add(SchemaVersion(version=SCHEMA_VERSION))
         db.commit()
+    elif row.version < SCHEMA_VERSION:
+        # Example migration: add new columns safely
+        row.version = SCHEMA_VERSION
+        db.commit()
     db.close()
 
 run_migrations()
 
 # ---------------- AUTH ----------------
 def hash_pw(pw: str) -> str:
-    return hashlib.sha256(pw.encode()).hexdigest()
+    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+
+def verify_pw(pw: str, hashed: str) -> bool:
+    return bcrypt.checkpw(pw.encode(), hashed.encode())
 
 def register_user(username, password):
     db = SessionLocal()
@@ -93,9 +105,7 @@ def login_user(username, password):
     db = SessionLocal()
     user = db.query(User).filter_by(username=username).first()
     db.close()
-    if user and user.password_hash == hash_pw(password):
-        return user.id
-    return None
+    if user and
 
 # ---------------- PDF PROCESSING ----------------
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
