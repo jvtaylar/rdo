@@ -1,10 +1,10 @@
 # streamlit_app.py
-# Streamlit app to manage PDF research papers with login, notes, and fast PDF viewer
+# Streamlit app to manage PDF research papers with login and notes using built-in st.pdf
 
 import streamlit as st
 import os
 import hashlib
-from st_pdf import st_pdf
+from PyPDF2 import PdfReader
 
 # ---------------- CONFIG ----------------
 DATA_DIR = "data"
@@ -36,11 +36,13 @@ def login():
 
 # ---------------- PDF UTIL ----------------
 def render_pdf(pdf_path):
-    # Fast, reliable PDF viewer for all browsers
+    # Show download button
     with open(pdf_path, "rb") as f:
         pdf_bytes = f.read()
     st.download_button("Download PDF", pdf_bytes, file_name=os.path.basename(pdf_path))
-    st_pdf(pdf_bytes, width=700, height=800)
+    
+    # Display PDF inline using Streamlit's built-in PDF support
+    st.pdf(pdf_bytes, height=800)
 
 # ---------------- MAIN APP ----------------
 def app():
