@@ -48,7 +48,7 @@ class Paper(Base):
     owner = relationship("User", back_populates="papers")
 
 # ---------------- MIGRATIONS ----------------
-Base.metadata.create_all(engine)
+Base.metadata.create_all(engine)  # creates tables if not exists
 
 # ---------------- AUTH ----------------
 def hash_pw(password: str) -> bytes:
@@ -62,7 +62,7 @@ def register_user(username: str, password: str):
     try:
         db.add(User(username=username, password_hash=hash_pw(password)))
         db.commit()
-        st.success("User registered")
+        st.success("User registered successfully!")
     except:
         db.rollback()
         st.error("Username already exists")
@@ -142,7 +142,7 @@ else:
             )
             db.add(paper)
             db.commit()
-            st.success("Paper uploaded successfully")
+            st.success("Paper uploaded successfully!")
 
     # ---------------- LIBRARY ----------------
     elif menu == "Library":
