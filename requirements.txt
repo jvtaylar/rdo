@@ -1,4 +1,6 @@
 streamlit[pdf]>=1.27.0
 PyPDF2>=3.0.0
 streamlit-pdf-viewer
+sqlalchemy>=2.0
+psycopg2-binary
 
