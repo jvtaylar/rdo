@@ -1,4 +1,4 @@
-# streamlit_app_clean.py
+# research_manager_clean.py
 import streamlit as st
 import bcrypt
 from datetime import datetime
@@ -9,7 +9,6 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 # ---------------- CONFIG ----------------
 DATABASE_URL = "sqlite:///research.db"
-SCHEMA_VERSION = 2
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
@@ -21,16 +20,11 @@ for key, value in {"logged_in": False, "user_id": None}.items():
         st.session_state[key] = value
 
 # ---------------- MODELS ----------------
-class SchemaVersion(Base):
-    __tablename__ = "schema_version"
-    id = Column(Integer, primary_key=True)
-    version = Column(Integer)
-
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
     username = Column(String, unique=True, nullable=False)
-    password_hash = Column(LargeBinary, nullable=False)  # bytes only
+    password_hash = Column(LargeBinary, nullable=False)  # bcrypt hash stored as bytes
     papers = relationship("Paper", back_populates="owner")
 
 class Paper(Base):
@@ -48,31 +42,16 @@ class Paper(Base):
     ai_summary = Column(Text)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     user_id = Column(Integer, ForeignKey("users.id"))
-
     owner = relationship("User", back_populates="papers")
 
 # ---------------- MIGRATIONS ----------------
-def run_migrations():
-    Base.metadata.create_all(engine)
-    db = SessionLocal()
-    row = db.query(SchemaVersion).first()
-    if not row:
-        db.add(SchemaVersion(version=SCHEMA_VERSION))
-        db.commit()
-    elif row.version < SCHEMA_VERSION:
-        row.version = SCHEMA_VERSION
-        db.commit()
-    db.close()
-
-run_migrations()
+Base.metadata.create_all(engine)
 
 # ---------------- AUTH ----------------
 def hash_pw(password: str) -> bytes:
-    """Hash password as bytes using bcrypt"""
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
 
 def verify_pw(password: str, hashed: bytes) -> bool:
-    """Verify password using bcrypt"""
     return bcrypt.checkpw(password.encode(), hashed)
 
 def register_user(username: str, password: str):
@@ -95,7 +74,7 @@ def login_user(username: str, password: str):
         return user.id
     return None
 
-# ---------------- PDF PROCESSING ----------------
+# ---------------- PDF HANDLING ----------------
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
     text = ""
@@ -104,12 +83,11 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     return text
 
 def export_bibtex(paper):
-    bib = f"""@article{{{paper.filename.split('.')[0]}_{paper.id},
+    return f"""@article{{{paper.filename.split('.')[0]}_{paper.id},
   author = {{{paper.authors}}},
   year = {{{paper.year}}},
   doi = {{{paper.doi}}}
 }}"""
-    return bib
 
 # ---------------- UI ----------------
 st.title("📚 Research Paper Manager")
@@ -117,10 +95,10 @@ st.title("📚 Research Paper Manager")
 if not st.session_state.logged_in:
     tab1, tab2 = st.tabs(["Login", "Register"])
     with tab1:
-        u = st.text_input("Username")
-        p = st.text_input("Password", type="password")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
         if st.button("Login"):
-            uid = login_user(u, p)
+            uid = login_user(username, password)
             if uid:
                 st.session_state.logged_in = True
                 st.session_state.user_id = uid
@@ -128,14 +106,14 @@ if not st.session_state.logged_in:
             else:
                 st.error("Invalid credentials")
     with tab2:
-        u = st.text_input("New Username")
-        p = st.text_input("New Password", type="password")
+        username = st.text_input("New Username")
+        password = st.text_input("New Password", type="password")
         if st.button("Register"):
-            register_user(u, p)
+            register_user(username, password)
 else:
     db = SessionLocal()
     menu = st.sidebar.radio("Menu", ["Upload", "Library", "Search", "Logout"])
-    
+
     if menu == "Upload":
         file = st.file_uploader("Upload PDF", type="pdf")
         authors = st.text_input("Authors")
@@ -158,7 +136,7 @@ else:
             db.add(paper)
             db.commit()
             st.success("Paper uploaded successfully")
-    
+
     elif menu == "Library":
         papers = db.query(Paper).filter_by(user_id=st.session_state.user_id).all()
         if not papers:
@@ -171,11 +149,10 @@ else:
                 st.write(f"**Tags:** {p.tags}")
                 st.download_button("Download PDF", p.pdf_data, file_name=p.filename)
                 st.pdf(p.pdf_data, height=600)
-                st.write(f"**Reading progress:** {p.reading_progress}%")
                 st.text_area("Highlights", value=p.highlights or "", key=f"hl_{p.id}")
                 st.text_area("AI Summary (placeholder)", value=p.ai_summary or "", key=f"ai_{p.id}")
                 st.download_button("Export BibTeX", export_bibtex(p), file_name=f"{p.filename}.bib")
-    
+
     elif menu == "Search":
         q = st.text_input("Search inside PDFs")
         if q:
@@ -186,10 +163,10 @@ else:
             st.write(f"Found {len(results)} result(s)")
             for r in results:
                 st.write(f"📄 {r.filename}")
-    
+
     elif menu == "Logout":
         st.session_state.logged_in = False
         st.session_state.user_id = None
         st.rerun()
-    
+
     db.close()
