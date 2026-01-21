@@ -93,7 +93,7 @@ def app():
 
     elif choice == "Logout":
         st.session_state.clear()
-        st.experimental_rerun()
+        st.rerun()
 
 # ---------------- RUN ----------------
 if "logged_in" not in st.session_state:
