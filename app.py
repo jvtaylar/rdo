@@ -1,4 +1,4 @@
-# streamlit_app_bcrypt_fixed.py
+# streamlit_app_bcrypt_bytes_fixed.py
 import streamlit as st
 import bcrypt
 from datetime import datetime
