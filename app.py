@@ -1,4 +1,4 @@
-# streamlit_app_bcrypt_bytes_fixed.py
+# streamlit_app_bcrypt_auto_migrate.py
 import streamlit as st
 import bcrypt
 from datetime import datetime
@@ -30,7 +30,7 @@ class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
     username = Column(String, unique=True, nullable=False)
-    password_hash = Column(LargeBinary, nullable=False)  # store bcrypt hash as bytes
+    password_hash = Column(LargeBinary, nullable=False)  # bytes
     papers = relationship("Paper", back_populates="owner")
 
 class Paper(Base):
@@ -65,6 +65,22 @@ def run_migrations():
     db.close()
 
 run_migrations()
+
+# ---------------- PASSWORD MIGRATION ----------------
+def migrate_hashes():
+    """Convert any existing string password hashes to bytes"""
+    db = SessionLocal()
+    users = db.query(User).all()
+    changed = False
+    for user in users:
+        if isinstance(user.password_hash, str):
+            user.password_hash = user.password_hash.encode()
+            changed = True
+    if changed:
+        db.commit()
+    db.close()
+
+migrate_hashes()
 
 # ---------------- AUTH ----------------
 def hash_pw(password: str) -> bytes:
