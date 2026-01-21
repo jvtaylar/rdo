@@ -1,17 +1,15 @@
 # streamlit_app.py
-# Streamlit app to upload, view, and annotate PDF research papers with secure login
+# Fast Streamlit app to manage PDF research papers with login and notes
 
 import streamlit as st
 import os
 import hashlib
 from PyPDF2 import PdfReader
-import streamlit.components.v1 as components
 
 # ---------------- CONFIG ----------------
 DATA_DIR = "data"
 PDF_DIR = os.path.join(DATA_DIR, "pdfs")
 USERS = {
-    # demo users: username -> sha256(password)
     "admin": hashlib.sha256("admin123".encode()).hexdigest(),
 }
 
@@ -38,20 +36,13 @@ def login():
 
 # ---------------- PDF UTIL ----------------
 def render_pdf(pdf_path):
+    # Fast viewing: provide a download button and direct browser link
     with open(pdf_path, "rb") as f:
         pdf_bytes = f.read()
     st.download_button("Download PDF", pdf_bytes, file_name=os.path.basename(pdf_path))
 
-    # Embed PDF using Streamlit components for cross-browser compatibility
-    pdf_display = f"""
-        <iframe
-            src='/file={pdf_path}'
-            width='100%'
-            height='600px'
-            style='border:none;'
-        ></iframe>
-    """
-    components.html(pdf_display, height=600)
+    # Link opens PDF in browser's native viewer (fast, supports large PDFs)
+    st.markdown(f"**View PDF:** [Open in Browser]({pdf_path})", unsafe_allow_html=True)
 
 # ---------------- MAIN APP ----------------
 def app():
