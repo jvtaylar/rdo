@@ -6,6 +6,7 @@ import streamlit as st
 import os
 import hashlib
 from PyPDF2 import PdfReader
+import base64
 
 # ---------------- CONFIG ----------------
 DATA_DIR = "data"
@@ -37,12 +38,18 @@ def login():
             st.error("Invalid username or password")
 
 # ---------------- PDF UTIL ----------------
-def extract_text(pdf_path):
-    reader = PdfReader(pdf_path)
-    text = ""
-    for page in reader.pages:
-        text += page.extract_text() or ""
-    return text
+def render_pdf(pdf_path):
+    with open(pdf_path, "rb") as f:
+        base64_pdf = base64.b64encode(f.read()).decode("utf-8")
+    pdf_display = f'''
+        <iframe
+            src="data:application/pdf;base64,{base64_pdf}"
+            width="100%"
+            height="600"
+            type="application/pdf">
+        </iframe>
+    '''
+    st.markdown(pdf_display, unsafe_allow_html=True)
 
 # ---------------- MAIN APP ----------------
 def app():
@@ -68,8 +75,8 @@ def app():
             path = os.path.join(PDF_DIR, selected)
             with open(path, "rb") as f:
                 st.download_button("Download PDF", f, file_name=selected)
-            st.subheader("Preview (Text Extract)")
-            st.text_area("", extract_text(path)[:5000], height=400)
+            st.subheader("PDF Preview")
+            render_pdf(path)
 
     elif choice == "Edit Notes":
         st.header("Edit Notes for a Paper")
