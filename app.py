@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, Column, Integer, String, LargeBinary, Text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 # ---------------- CONFIG ----------------
-DATABASE_URL = "sqlite:///research.db"
+DATABASE_URL = "sqlite:///research1.db"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
