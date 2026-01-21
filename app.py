@@ -1,12 +1,11 @@
 # streamlit_app.py
-# Simple Streamlit app to upload, view, and lightly edit (notes/metadata) PDF research papers
-# Username & password authentication (basic, demo-level)
+# Streamlit app to upload, view, and annotate PDF research papers with secure login
 
 import streamlit as st
 import os
 import hashlib
 from PyPDF2 import PdfReader
-import base64
+import streamlit.components.v1 as components
 
 # ---------------- CONFIG ----------------
 DATA_DIR = "data"
@@ -40,16 +39,19 @@ def login():
 # ---------------- PDF UTIL ----------------
 def render_pdf(pdf_path):
     with open(pdf_path, "rb") as f:
-        base64_pdf = base64.b64encode(f.read()).decode("utf-8")
-    pdf_display = f'''
+        pdf_bytes = f.read()
+    st.download_button("Download PDF", pdf_bytes, file_name=os.path.basename(pdf_path))
+
+    # Embed PDF using Streamlit components for cross-browser compatibility
+    pdf_display = f"""
         <iframe
-            src="data:application/pdf;base64,{base64_pdf}"
-            width="100%"
-            height="600"
-            type="application/pdf">
-        </iframe>
-    '''
-    st.markdown(pdf_display, unsafe_allow_html=True)
+            src='/file={pdf_path}'
+            width='100%'
+            height='600px'
+            style='border:none;'
+        ></iframe>
+    """
+    components.html(pdf_display, height=600)
 
 # ---------------- MAIN APP ----------------
 def app():
@@ -73,9 +75,6 @@ def app():
         else:
             selected = st.selectbox("Select a paper", files)
             path = os.path.join(PDF_DIR, selected)
-            with open(path, "rb") as f:
-                st.download_button("Download PDF", f, file_name=selected)
-            st.subheader("PDF Preview")
             render_pdf(path)
 
     elif choice == "Edit Notes":
@@ -99,7 +98,8 @@ def app():
                 st.success("Notes saved")
 
     elif choice == "Logout":
-        st.session_state.clear()
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.rerun()
 
 # ---------------- RUN ----------------
@@ -110,12 +110,3 @@ if not st.session_state["logged_in"]:
     login()
 else:
     app()
-
-# ---------------- NOTES ----------------
-# This app:
-# - Uploads and stores PDFs locally
-# - Allows viewing & text extraction
-# - Allows editing notes (not modifying PDF content itself)
-# For full PDF editing (highlight, annotate, rewrite), integrate:
-# - streamlit-pdf-viewer + PyMuPDF (fitz)
-# - or external annotation libraries
