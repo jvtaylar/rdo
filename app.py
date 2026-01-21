@@ -1,4 +1,4 @@
-# streamlit_app_full.py
+# streamlit_app_bcrypt_fixed.py
 import streamlit as st
 import bcrypt
 from datetime import datetime
@@ -30,7 +30,7 @@ class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
     username = Column(String, unique=True, nullable=False)
-    password_hash = Column(String, nullable=False)
+    password_hash = Column(LargeBinary, nullable=False)  # store bcrypt hash as bytes
     papers = relationship("Paper", back_populates="owner")
 
 class Paper(Base):
@@ -67,11 +67,11 @@ def run_migrations():
 run_migrations()
 
 # ---------------- AUTH ----------------
-def hash_pw(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+def hash_pw(password: str) -> bytes:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
 
-def verify_pw(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
+def verify_pw(password: str, hashed: bytes) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed)
 
 def register_user(username: str, password: str):
     db = SessionLocal()
