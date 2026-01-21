@@ -1,147 +1,116 @@
-# streamlit_app_db_files.py
-# Streamlit app: PDFs stored directly in SQLite database (BLOB)
+# streamlit_app_advanced.py
+# Advanced Research Paper Manager
+# - PostgreSQL backend
+# - Automatic migrations (schema versioning)
+# - PDF full-text search
+# - Metadata support (authors, year, DOI)
 
 import streamlit as st
-import sqlite3
 import hashlib
 from datetime import datetime
+from sqlalchemy import (
+    create_engine, Column, Integer, String, LargeBinary, Text, DateTime, ForeignKey
+)
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.exc import OperationalError
+import PyPDF2
+import io
 
 # ---------------- CONFIG ----------------
-DB_PATH = "data/research_manager.db"
+DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/research_db"
+SCHEMA_VERSION = 1
 
-# ---------------- SESSION STATE INIT ----------------
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-if "user_id" not in st.session_state:
-    st.session_state["user_id"] = None
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
 
-# ---------------- DATABASE ----------------
-def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+# ---------------- SESSION STATE ----------------
+for key, value in {
+    "logged_in": False,
+    "user_id": None
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
-def init_db():
-    conn = get_db_connection()
-    cur = conn.cursor()
+# ---------------- MODELS ----------------
+class SchemaVersion(Base):
+    __tablename__ = "schema_version"
+    id = Column(Integer, primary_key=True)
+    version = Column(Integer)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password_hash TEXT
-        )
-    """)
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True)
+    password_hash = Column(String)
+    papers = relationship("Paper", back_populates="owner")
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS pdfs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename TEXT,
-            pdf_data BLOB,
-            uploaded_by INTEGER,
-            upload_date TEXT,
-            FOREIGN KEY(uploaded_by) REFERENCES users(id)
-        )
-    """)
+class Paper(Base):
+    __tablename__ = "papers"
+    id = Column(Integer, primary_key=True)
+    filename = Column(String)
+    authors = Column(String)
+    year = Column(Integer)
+    doi = Column(String)
+    pdf_data = Column(LargeBinary)
+    extracted_text = Column(Text)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    user_id = Column(Integer, ForeignKey("users.id"))
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pdf_id INTEGER,
-            user_id INTEGER,
-            note TEXT,
-            FOREIGN KEY(pdf_id) REFERENCES pdfs(id),
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        )
-    """)
+    owner = relationship("User", back_populates="papers")
 
-    conn.commit()
-    conn.close()
+# ---------------- MIGRATIONS ----------------
+def run_migrations():
+    Base.metadata.create_all(engine)
+    db = SessionLocal()
+    try:
+        version_row = db.query(SchemaVersion).first()
+        if not version_row:
+            db.add(SchemaVersion(version=SCHEMA_VERSION))
+            db.commit()
+    except OperationalError:
+        pass
+    finally:
+        db.close()
 
-init_db()
+run_migrations()
 
 # ---------------- AUTH ----------------
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
-def register_user(username, password):
-    conn = get_db_connection()
-    try:
-        conn.execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-            (username, hash_pw(password))
-        )
-        conn.commit()
-        st.success("User registered")
-    except sqlite3.IntegrityError:
-        st.error("Username already exists")
-    finally:
-        conn.close()
-
 def login_user(username, password):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE username=?", (username,))
-    user = cur.fetchone()
-    conn.close()
-    if user and user["password_hash"] == hash_pw(password):
-        return user["id"]
+    db = SessionLocal()
+    user = db.query(User).filter_by(username=username).first()
+    db.close()
+    if user and user.password_hash == hash_pw(password):
+        return user.id
     return None
 
-# ---------------- PDF OPS ----------------
-def save_pdf_to_db(filename, pdf_bytes, user_id):
-    conn = get_db_connection()
-    conn.execute(
-        "INSERT INTO pdfs (filename, pdf_data, uploaded_by, upload_date) VALUES (?, ?, ?, ?)",
-        (filename, pdf_bytes, user_id, datetime.now().isoformat())
-    )
-    conn.commit()
-    conn.close()
+def register_user(username, password):
+    db = SessionLocal()
+    try:
+        db.add(User(username=username, password_hash=hash_pw(password)))
+        db.commit()
+        st.success("User registered")
+    except:
+        db.rollback()
+        st.error("Username exists")
+    finally:
+        db.close()
 
-def get_user_pdfs(user_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id, filename FROM pdfs WHERE uploaded_by=?", (user_id,))
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
-def get_pdf_data(pdf_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT pdf_data, filename FROM pdfs WHERE id=?", (pdf_id,))
-    row = cur.fetchone()
-    conn.close()
-    return row
-
-# ---------------- NOTES ----------------
-def get_note(pdf_id, user_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT note FROM notes WHERE pdf_id=? AND user_id=?", (pdf_id, user_id))
-    row = cur.fetchone()
-    conn.close()
-    return row["note"] if row else ""
-
-def save_note(pdf_id, user_id, note):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    if get_note(pdf_id, user_id):
-        cur.execute(
-            "UPDATE notes SET note=? WHERE pdf_id=? AND user_id=?",
-            (note, pdf_id, user_id)
-        )
-    else:
-        cur.execute(
-            "INSERT INTO notes (pdf_id, user_id, note) VALUES (?, ?, ?)",
-            (pdf_id, user_id, note)
-        )
-    conn.commit()
-    conn.close()
+# ---------------- PDF PROCESSING ----------------
+def extract_text_from_pdf(pdf_bytes):
+    reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text() or ""
+    return text
 
 # ---------------- UI ----------------
-if not st.session_state["logged_in"]:
-    st.title("📄 Research Paper Manager (DB Stored PDFs)")
+st.title("📚 Advanced Research Paper Manager")
+
+if not st.session_state.logged_in:
     tab1, tab2 = st.tabs(["Login", "Register"])
 
     with tab1:
@@ -150,8 +119,8 @@ if not st.session_state["logged_in"]:
         if st.button("Login"):
             uid = login_user(u, p)
             if uid:
-                st.session_state["logged_in"] = True
-                st.session_state["user_id"] = uid
+                st.session_state.logged_in = True
+                st.session_state.user_id = uid
                 st.rerun()
             else:
                 st.error("Invalid credentials")
@@ -163,39 +132,55 @@ if not st.session_state["logged_in"]:
             register_user(u, p)
 
 else:
-    user_id = st.session_state["user_id"]
-    st.sidebar.title("📚 Menu")
-    choice = st.sidebar.radio("Navigate", ["Upload PDF", "View PDFs", "Edit Notes", "Logout"])
+    db = SessionLocal()
+    menu = st.sidebar.radio("Menu", ["Upload", "Library", "Search", "Logout"])
 
-    if choice == "Upload PDF":
-        uploaded = st.file_uploader("Upload PDF", type="pdf")
-        if uploaded:
-            save_pdf_to_db(uploaded.name, uploaded.read(), user_id)
-            st.success("PDF stored in database")
+    if menu == "Upload":
+        file = st.file_uploader("Upload PDF", type="pdf")
+        authors = st.text_input("Authors")
+        year = st.number_input("Year", min_value=1900, max_value=2100, step=1)
+        doi = st.text_input("DOI")
 
-    elif choice == "View PDFs":
-        pdfs = get_user_pdfs(user_id)
-        if not pdfs:
-            st.info("No PDFs uploaded")
-        else:
-            selected = st.selectbox("Select PDF", pdfs, format_func=lambda x: x["filename"])
-            row = get_pdf_data(selected["id"])
-            st.download_button("Download PDF", row["pdf_data"], file_name=row["filename"])
-            st.pdf(row["pdf_data"], height=800)
+        if file and st.button("Save"):
+            pdf_bytes = file.read()
+            text = extract_text_from_pdf(pdf_bytes)
+            paper = Paper(
+                filename=file.name,
+                authors=authors,
+                year=year,
+                doi=doi,
+                pdf_data=pdf_bytes,
+                extracted_text=text,
+                user_id=st.session_state.user_id
+            )
+            db.add(paper)
+            db.commit()
+            st.success("Paper uploaded")
 
-    elif choice == "Edit Notes":
-        pdfs = get_user_pdfs(user_id)
-        if not pdfs:
-            st.info("No PDFs available")
-        else:
-            selected = st.selectbox("Select PDF", pdfs, format_func=lambda x: x["filename"])
-            note = get_note(selected["id"], user_id)
-            new_note = st.text_area("Notes", note, height=300)
-            if st.button("Save Notes"):
-                save_note(selected["id"], user_id, new_note)
-                st.success("Notes saved")
+    elif menu == "Library":
+        papers = db.query(Paper).filter_by(user_id=st.session_state.user_id).all()
+        for p in papers:
+            with st.expander(p.filename):
+                st.write(f"**Authors:** {p.authors}")
+                st.write(f"**Year:** {p.year}")
+                st.write(f"**DOI:** {p.doi}")
+                st.download_button("Download", p.pdf_data, file_name=p.filename)
+                st.pdf(p.pdf_data, height=600)
 
-    elif choice == "Logout":
-        st.session_state["logged_in"] = False
-        st.session_state["user_id"] = None
+    elif menu == "Search":
+        q = st.text_input("Search inside PDFs")
+        if q:
+            results = db.query(Paper).filter(
+                Paper.user_id == st.session_state.user_id,
+                Paper.extracted_text.ilike(f"%{q}%")
+            ).all()
+            st.write(f"Found {len(results)} result(s)")
+            for r in results:
+                st.write(f"📄 {r.filename}")
+
+    elif menu == "Logout":
+        st.session_state.logged_in = False
+        st.session_state.user_id = None
         st.rerun()
+
+    db.close()
